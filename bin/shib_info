@@ -1,11 +1,9 @@
 #!/usr/bin/env ruby
 
-require 'net/http'
-require 'nokogiri'
 require 'optparse'
+require_relative '../lib/metadata.rb'
 
 # get args
-domain_parse = true
 verbose = false
 OptionParser.new do |opts|
   opts.banner = <<usage
@@ -27,42 +25,33 @@ end.parse!
 
 q = ARGV[0]
 
-# fetch metadata, find entityID matches
-doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
-doc.remove_namespaces! # until/unless we figure out how to do this right
-
-# search for matching entitly ids, limit search to SSO providers
-eids = doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService]/@entityID").map { |attr| attr.value }
+eids = get_entityIDs(q)
 
 # no match
 if eids.size < 1
   puts "#{q}: no match"
-# many matches, list choices
+# many matches, list hits
 elsif eids.size > 1
   puts eids
 # one match, print IdP info
 else
-  eid = eids[0]
+  info = get_entity_info(q)
 
-  puts "EntityID: #{eid}"
-  print 'Support Contact: '
-  support_addresses = doc.xpath("//EntityDescriptor[@entityID='#{eid}']/ContactPerson[@contactType='support']/EmailAddress")
-  if !support_addresses.empty?
-    print support_addresses.map { |node| node.inner_text }.join(', ') + ' '
+  puts "EntityID: #{info[:entityID]}"
+  if(info[:support_contacts])
+    puts "Support Contact: #{info[:support_contacts].join(', ')}"
   else
-    print "NONE "
+    puts "NO SUPPORT CONTACT"
   end
-  print 'Technical Contact: '
-  support_addresses = doc.xpath("//EntityDescriptor[@entityID='#{eid}']/ContactPerson[@contactType='technical']/EmailAddress")
-  if !support_addresses.empty?
-    print support_addresses.map { |node| node.inner_text }.join(', ') + ' '
+
+  if(info[:technical_contacts])
+    puts "Technical Contact: #{info[:technical_contacts].join(', ')}"
   else
-    print "NONE "
+    puts "NO TECHNICAL CONTACT"
   end
-  puts
 
   if verbose
-    puts 'Full EntityDescriptor:'
-    puts doc.xpath("//EntityDescriptor[@entityID='#{eid}']")
+    puts 'EntityDescriptor:'
+    puts get_EntityDescriptor(q)
   end
 end
