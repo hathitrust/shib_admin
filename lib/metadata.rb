@@ -1,6 +1,5 @@
 require 'net/http'
 require 'nokogiri'
-require 'byebug'
 
 # fetch metadata, find entityID matches
 @doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
@@ -42,3 +41,18 @@ def get_entity_info(q)
   ret
 end
 
+def mk_initiator(eid)
+  location = nil  
+
+  /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net)/ =~ eid
+  location = domain
+  location ||= 'LOCATION_HERE'
+
+  <<SessionInitiator
+<SessionInitiator type="Chaining" Location="/#{location}"
+    entityID="#{eid}" template="bindingTemplate.html">
+    <SessionInitiator type="SAML2"/>
+    <SessionInitiator type="Shib1"/>
+</SessionInitiator>
+SessionInitiator
+end

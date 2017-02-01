@@ -53,5 +53,8 @@ else
   if verbose
     puts 'EntityDescriptor:'
     puts get_EntityDescriptor(q)
+  else
+    puts 'SessionInitiator:'
+    puts mk_initiator(info[:entityID])
   end
 end
