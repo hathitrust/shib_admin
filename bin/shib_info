@@ -1,0 +1,90 @@
+#!/usr/bin/env ruby
+
+require 'net/http'
+require 'nokogiri'
+require 'optparse'
+
+# get args
+domain_parse = true
+verbose = false
+OptionParser.new do |opts|
+  opts.banner = <<usage
+
+Usage: shib_info [-dv] [ entityID_substring [ location ]]
+
+Prints a list of possible entityID's, or a SessionInitiator if only one
+entityID is matched. Use without options to see full list of InCommon IdP's.
+
+usage
+
+  opts.on("-d", "--[no-]domain", "Try to parse location from domain name, superseded by command line location") do |d|
+    domain_parse = d
+  end
+  opts.on("-v", "--[no-]verbose", "Prints large XML dumps when relevant to query") do |v|
+    verbose = v
+  end
+
+end.parse!
+
+q = ARGV[0]
+location = ARGV[1]
+
+# fetch metadata, find entityID matches
+doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
+#doc = Nokogiri::XML(Net::HTTP.get(URI('http://ds.aaf.edu.au/distribution/metadata/metadata.aaf.signed.complete.xml')))
+doc.remove_namespaces! # untill/unless we figure out how to do this right
+
+# all entities
+#eids = doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')]/@entityID").map { |attr| attr.value }
+# only SSO providers
+eids = doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService]/@entityID").map { |attr| attr.value }
+
+# no match
+if eids.size < 1
+  puts "#{q}: no match"
+# many matches, list choices
+elsif eids.size > 1
+  puts eids
+# one match, print IdP info
+else
+  eid = eids[0]
+
+  # get location (from domain name if requested)
+  if !location and domain_parse
+    /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net)/ =~ eid
+    location = domain
+  end
+  location ||= 'LOCATION_HERE'
+
+  puts <<SessionInitiator
+Exactly one match! Session initiator supplied below (goes in etc/shibboleth/shibboleth2.xml):
+
+<SessionInitiator type="Chaining" Location="/#{location}"
+    entityID="#{eid}" template="bindingTemplate.html">
+    <SessionInitiator type="SAML2"/>
+    <SessionInitiator type="Shib1"/>
+</SessionInitiator>
+
+SessionInitiator
+  print 'Support Contact: '
+  support_addresses = doc.xpath("//EntityDescriptor[@entityID='#{eid}']/ContactPerson[@contactType='support']/EmailAddress")
+  if !support_addresses.empty?
+    print support_addresses.map { |node| node.inner_text }.join(', ') + ' '
+  else
+    print "NONE "
+  end
+  print 'Technical Contact: '
+  support_addresses = doc.xpath("//EntityDescriptor[@entityID='#{eid}']/ContactPerson[@contactType='technical']/EmailAddress")
+  if !support_addresses.empty?
+    print support_addresses.map { |node| node.inner_text }.join(', ') + ' '
+  else
+    print "NONE "
+  end
+  puts
+  puts
+
+  if verbose
+    puts 'Full EntityDescriptor:'
+    puts doc.xpath("//EntityDescriptor[@entityID='#{eid}']")
+  end
+end
