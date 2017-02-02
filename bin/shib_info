@@ -53,16 +53,16 @@ else
 
   puts "EntityID: #{info[:entityID]}"
   puts "Name: #{info[:name]}"
-  if(info[:support_contacts])
+  if(info[:support_contacts] and (info[:support_contacts].size > 0))
     puts "Support Contact: #{info[:support_contacts].join(', ')}"
   else
-    puts "NO SUPPORT CONTACT"
+    puts "Support Contact: NO SUPPORT CONTACT"
   end
 
-  if(info[:technical_contacts])
+  if(info[:technical_contacts] and (info[:technical_contacts].size > 0))
     puts "Technical Contact: #{info[:technical_contacts].join(', ')}"
   else
-    puts "NO TECHNICAL CONTACT"
+    puts "Technical Contact: NO TECHNICAL CONTACT"
   end
 
   if verbose
