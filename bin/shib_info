@@ -52,6 +52,7 @@ else
   info = get_entity_info(q)
 
   puts "EntityID: #{info[:entityID]}"
+  puts "Name: #{info[:name]}"
   if(info[:support_contacts])
     puts "Support Contact: #{info[:support_contacts].join(', ')}"
   else

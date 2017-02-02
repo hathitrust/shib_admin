@@ -96,7 +96,6 @@ else
   ed = eds[0]
   eid = ed.get_attribute("entityID")
   puts "EntityID: #{eid}"
-
   puts "Connecting to Database..."
   puts "Username: #{ENV['USER']}"
   print "Password: "
@@ -136,22 +135,25 @@ else
       domain = "#{base}.#{ext}"
     end
 
+    puts "Looks like this is a new institution. Please confirm I've got the domain right."
     print "Domain "
     domain = get_string(domain)
     print "Domain Base (domain w/o tld) "
     domain_base = get_string(domain_base)
+
+    info = get_entity_info(eid)
 
     # default values
     current = {
       sdrinst: domain_base,
       inst_id: domain_base,
       grin_instance: nil,
-      name: "EXAMPLE UNIVERSITY NAME",
+      name: info[:name],
       template: "https://___HOST___/Shibboleth.sso/#{domain_base}?target=___TARGET___",
       authtype: "shibboleth",
       domain: domain,
       us: true,
-      enabled: 2,
+      enabled: false,
       orph_agree: false,
       entityID: eid,
       allowed_affiliations: "^(alum|member)@#{domain}"
@@ -164,8 +166,15 @@ else
 
   # edit here
   no_edit = [:entityID,:authtype]
-  entry_exists and no_edit.push(:inst_id)
+  if (entry_exists)
+    # don't change primary keys
+    no_edit.push(:inst_id)
+  else
+    # don't ask twice
+    no_edit.push(:domain)
+  end
 
+  puts "Editing settings for #{current[:inst_id]}."
   puts "Enter changes as desired, press Enter without typing to accept default/current values."
 
   current.keys.each do |k|

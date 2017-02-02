@@ -35,7 +35,14 @@ def get_entity_info(q)
 
     support.uniq!
     technical.uniq!
-    ret = { support_contacts: support, technical_contacts: technical, entityID: eid }
+
+    name = nil
+    org = entity.xpath("./Organization/OrganizationName")[0]
+    if org
+      name = org.content
+    end
+
+    ret = { support_contacts: support, technical_contacts: technical, entityID: eid, name: name }
   end
 
   ret
