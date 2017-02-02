@@ -106,8 +106,8 @@ else
   password.chomp!
   puts
   
-  #DB = Sequel.mysql2('ht',user:ENV['USER'],host:'mysql-sdr',password:password)
-  DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-htdev',password:password)
+  #DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-htdev',password:password)
+  DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-sdr',password:password)
   current = DB[:ht_institutions].where(entityID:eid).all
   if (current.size > 1)
     puts "More than 1 db entry found for entityID \"#{eid}\". Aborting."
