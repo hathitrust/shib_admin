@@ -1,0 +1,206 @@
+#!/usr/bin/env ruby
+
+## Bundler binstub boilerplate
+require "pathname"
+ENV["BUNDLE_GEMFILE"] ||= File.expand_path("../../Gemfile",
+  Pathname.new(__FILE__).realpath)
+
+require "rubygems"
+require "bundler/setup"
+##
+
+require 'optparse'
+require 'sequel'
+require_relative '../lib/metadata.rb'
+
+# get args
+verbose = false
+OptionParser.new do |opts|
+  opts.banner = <<usage
+
+Usage: #{$0} [ entityID_substring ]
+
+Create or edit the ht_institutions table entry for specified entityID. Entry
+only be edited by this tool if it is not yet enabled or does not yet exist.
+
+There must be exactly one matching entityID in the metadata.
+usage
+
+  opts.on("-h", "--help", "Prints this help") do
+    puts opts
+    exit
+  end
+
+end.parse!
+
+q = ARGV.shift
+
+def yorn(default)
+  if(default)
+    print "[Y/n]: "
+  else
+    print "[y/N]: "
+  end
+
+  ret = default
+
+  while(true)
+    answer = gets
+    answer.chomp!
+
+    if(answer.empty?)
+      break
+    elsif(answer.match(/^y(es)?$/i))
+      ret = true
+      break
+    elsif(answer.match(/^n(o)?$/i))
+      ret = false
+      break
+    end
+
+    print "answer 'yes' or 'no': "
+  end
+
+  ret
+end
+
+def get_string(default)
+  if (default==nil)
+    print "[NULL]: "
+  else
+    print "[#{default}]: "
+  end
+  answer = gets
+  answer.chomp!
+  answer.empty? and return default
+  (answer == "NULL") and answer = nil
+  answer
+end
+
+def pp(hash)
+  hash.each do |k,v|
+    if (v==nil) 
+      v = "NULL"
+    end
+    puts sprintf("%20s : %s",k,v)
+  end
+end
+
+eds = get_EntityDescriptors(q)
+
+# no match
+if eds.size != 1
+  puts "#{eds.size} matches. Try using shib_info to find an entityID substring with exactly one match."
+# one match, continue
+else
+  ed = eds[0]
+  eid = ed.get_attribute("entityID")
+  puts "EntityID: #{eid}"
+
+  puts "Connecting to Database..."
+  puts "Username: #{ENV['USER']}"
+  print "Password: "
+  IO::console.echo=false  
+  password = gets
+  IO::console.echo=true
+  password.chomp!
+  puts
+  
+  #DB = Sequel.mysql2('ht',user:ENV['USER'],host:'mysql-sdr',password:password)
+  DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-htdev',password:password)
+  current = DB[:ht_institutions].where(entityID:eid).all
+  if (current.size > 1)
+    puts "More than 1 db entry found for entityID \"#{eid}\". Aborting."
+    exit 0
+  end
+
+  entry_exists = false
+  edit = true
+  if (current.size == 1)
+    puts "Existing entry found."
+    current = current[0]
+    pp current
+    if (current[:enabled])
+      puts "Edit mode not allowed for production entries, exiting."
+      exit 0
+    end
+    print "Edit?"
+    edit = yorn(false)
+    entry_exists = true
+  else
+    domain = "EXAMPLE.edu"
+    domain_base = "EXAMPLE"
+    /\b(?<base>[a-z\-]+)\.(?<ext>edu|gov|com|org|net|ac\.uk)/ =~ eid
+    if(base and ext)
+      domain_base = base
+      domain = "#{base}.#{ext}"
+    end
+
+    print "Domain "
+    domain = get_string(domain)
+    print "Domain Base (domain w/o tld) "
+    domain_base = get_string(domain_base)
+
+    # default values
+    current = {
+      sdrinst: domain_base,
+      inst_id: domain_base,
+      grin_instance: nil,
+      name: "EXAMPLE UNIVERSITY NAME",
+      template: "https://___HOST___/Shibboleth.sso/#{domain_base}?target=___TARGET___",
+      authtype: "shibboleth",
+      domain: domain,
+      us: true,
+      enabled: 2,
+      orph_agree: false,
+      entityID: eid,
+      allowed_affiliations: "^(alum|member)@#{domain}"
+    }
+  end
+
+  unless(edit)
+    exit 0
+  end
+
+  # edit here
+  no_edit = [:entityID,:authtype]
+  entry_exists and no_edit.push(:inst_id)
+
+  puts "Enter changes as desired, press Enter without typing to accept default/current values."
+
+  current.keys.each do |k|
+    v = current[k]
+    # no edit allowed
+    if(no_edit.include?(k))
+      puts "#{k}: #{v} (cannot edit)"
+    # true/false edit
+    elsif(v == true or v == false)
+      print k; print ' '
+      current[k] = yorn(v)
+    # string edit
+    else
+      print "#{k} "
+      current[k] = get_string(v)
+    end
+  end
+
+  pp current
+
+  print "Commit to database? "
+  commit = yorn(!entry_exists)
+  commit or exit 0
+
+  if (entry_exists)
+    inst_id = current.delete(:inst_id)
+    current.delete(:authtype)
+    current.delete(:entityID)
+    qq = DB[:ht_institutions].where(inst_id: inst_id, entityID: eid)
+    if(qq.count != 1)
+      puts "ERROR UPDATING TABLE: #{qq.count} rows found to update. Aborting."
+    end
+    result = DB[:ht_institutions].where(inst_id: inst_id, entityID: eid).update(current)
+    puts "#{result} row updated"
+  else
+    DB[:ht_institutions].insert(current)
+  end
+end

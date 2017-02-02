@@ -1,8 +1,8 @@
 source 'https://rubygems.org'
 
-gem 'pry'
-#gem 'sqlite3'
-#gem 'sequel'
+#gem 'pry'
+gem 'sequel'
+gem 'mysql2'
 gem 'nokogiri'
 #gem 'byebug'
 
