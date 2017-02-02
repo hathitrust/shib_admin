@@ -48,12 +48,14 @@ def get_entity_info(q)
   ret
 end
 
-def mk_initiator(eid)
-  location = nil  
-
-  /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net)/ =~ eid
-  location = domain
-  location ||= 'LOCATION_HERE'
+# generate SessionInitiator for shibboleth2.xml
+# if location is skipped, attempts to guess location from entityID
+def mk_initiator(eid,location=nil)
+  unless(location)
+    /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net|ac\.uk)/ =~ eid
+    location = domain
+    location ||= 'LOCATION_HERE'
+  end
 
   <<SessionInitiator
 <SessionInitiator type="Chaining" Location="/#{location}"
