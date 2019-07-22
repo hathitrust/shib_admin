@@ -12,6 +12,9 @@ require "bundler/setup"
 require 'optparse'
 require_relative '../lib/metadata.rb'
 
+# Coordinator for users who require elevated access
+ACTIVITY_CONTACT = "keden@umich.edu"
+
 class DoYouEvenMFA
   def initialize(metadata)
     @metadata = metadata
@@ -28,7 +31,7 @@ class DoYouEvenMFA
     puts <<~EOT
       Subject: Is multi-factor authentication available with #{campus}'s Shibboleth IdP?
       To: #{tech_contacts}
-      Cc: keden@umich.edu
+      Cc: #{ACTIVITY_CONTACT}
 
       Hi,
 
