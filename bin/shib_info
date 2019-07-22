@@ -12,8 +12,97 @@ require "bundler/setup"
 require 'optparse'
 require_relative '../lib/metadata.rb'
 
+class DoYouEvenMFA
+  def initialize(metadata)
+    @metadata = metadata
+  end
+
+  attr_accessor :campus
+
+  def run_query(q, verbose: false)
+    info = metadata.entity_info(q)
+    entityID = info[:entityID]
+    @campus ||= info[:name]
+    tech_contacts = info[:technical_contacts].join(', ')
+
+    puts <<~EOT
+      Subject: Is multi-factor authentication available with #{campus}'s Shibboleth IdP?
+      To: #{tech_contacts}
+      Cc: keden@umich.edu
+
+      Hi,
+
+      I'm reaching out to you because you're the technical contact listed in the InCommon metadata for #{campus}'s IdP. Please let me know if there's someone more appropriate to contact.
+
+      We are interested in providing multi-factor authentication for a few #{campus} staff to the HathiTrust Shibboleth SP.
+
+      In particular, this is for a few staff members who have special access to in-copyright material in HathiTrust for the purposes of doing copyright evaluation or for obtaining material for students with print disabilities. Currently, these users are limited to accessing from a single static IP address, but we could remove this requirement if these users were able to access with Shibboleth + multi-factor authentication.
+
+      Our question is whether your Shibboleth IdP supports multi-factor authentication via requesting a particular authnContextClassRef? For example, for Michigan's IdP we can request 2FA with Duo via
+
+      authnContextClassRef=https://refeds.org/profile/mfa
+
+      That authnContextClass is becoming more standard for signaling that multi-factor authentication was used with Shibboleth, but we can support other authnContextClasses as well. 
+
+      You can test that HathiTrust can request multi-factor authentication and that your IdP can prove that it was used with HathiTrust by visiting:
+
+      https://babel.hathitrust.org/Shibboleth.sso/Login?entityID=#{entityID}&target=https://babel.hathitrust.org/cgi/whoami&authnContextClassRef=PUT_YOUR_AUTH_CONTEXT_HERE
+
+      With the correct authnContextClass, you should be forwarded to #{campus}'s IdP to log in, prompted for Duo authentication, and then see the given authnContextClass in the output when you return.
+
+      Please note that we are not currently able to accept out-of-band assertions that all staff or all users use multi-factor authentication when logging in via Shibboleth. This is because although that might currently be the case, we would not have an automatic way to know if the policy changed in the future or if there were exceptions to the policy. Our only supported method for supporting Shibboleth + multi-factor authentication is via the SAML authnContextClass.
+
+      Please let me know if you need any more information about this use case!
+
+      Thanks,
+    EOT
+  end
+
+  private
+
+  attr_reader :metadata
+end
+
+class EntityInfoPrinter
+  def initialize(metadata)
+    @metadata = metadata
+  end
+
+  def run_query(q, verbose: false)
+    info = metadata.entity_info(q)
+    puts "EntityID: #{info[:entityID]}"
+    puts "Name: #{info[:name]}"
+    if(info[:support_contacts] and (info[:support_contacts].size > 0))
+      puts "Support Contact: #{info[:support_contacts].join(', ')}"
+    else
+      puts "Support Contact: NO SUPPORT CONTACT"
+    end
+
+    if(info[:technical_contacts] and (info[:technical_contacts].size > 0))
+      puts "Technical Contact: #{info[:technical_contacts].join(', ')}"
+    else
+      puts "Technical Contact: NO TECHNICAL CONTACT"
+    end
+
+    if verbose
+      puts 'EntityDescriptor:'
+      puts metadata.entity_descriptor(q)
+    else
+      puts 'SessionInitiator:'
+      puts metadata.initiator(info[:entityID])
+    end
+  end
+
+  private
+
+  attr_reader :metadata
+end
+
 # get args
 verbose = false
+metadata = ShibMetadata.new
+handler = EntityInfoPrinter.new(metadata)
+short_campus = nil
 OptionParser.new do |opts|
   opts.banner = <<usage
 
@@ -35,11 +124,19 @@ usage
     exit
   end
 
+  opts.on("-m", "--do-you-even-mfa", "Prints a form letter for asking the institution if they can support MFA with Shibboleth") do
+    handler = DoYouEvenMFA.new(metadata)
+  end
+
+  opts.on("-c NAME", "--campus=NAME", "Overrides the campus name for the form letter") do |n|
+    handler.campus = n
+  end
+
 end.parse!
 
 q = ARGV[0]
 
-eids = get_entityIDs(q)
+eids = metadata.entity_ids(q)
 
 # no match
 if eids.size < 1
@@ -49,27 +146,5 @@ elsif eids.size > 1
   puts eids
 # one match, print IdP info
 else
-  info = get_entity_info(q)
-
-  puts "EntityID: #{info[:entityID]}"
-  puts "Name: #{info[:name]}"
-  if(info[:support_contacts] and (info[:support_contacts].size > 0))
-    puts "Support Contact: #{info[:support_contacts].join(', ')}"
-  else
-    puts "Support Contact: NO SUPPORT CONTACT"
-  end
-
-  if(info[:technical_contacts] and (info[:technical_contacts].size > 0))
-    puts "Technical Contact: #{info[:technical_contacts].join(', ')}"
-  else
-    puts "Technical Contact: NO TECHNICAL CONTACT"
-  end
-
-  if verbose
-    puts 'EntityDescriptor:'
-    puts get_EntityDescriptor(q)
-  else
-    puts 'SessionInitiator:'
-    puts mk_initiator(info[:entityID])
-  end
+  handler.run_query(q, verbose: verbose)
 end

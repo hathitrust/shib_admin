@@ -1,67 +1,74 @@
 require 'net/http'
 require 'nokogiri'
 
-# fetch metadata, find entityID matches
-@doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
-@doc.remove_namespaces! # until/unless we figure out how to do this right
 
-def get_EntityDescriptors(q)
-  # search for entities w/ matching entityIDs, limit search to SSO providers
-  @doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService][@entityID]")
-end
+class ShibMetadata
 
-def get_EntityDescriptor(q)
-  eds = get_EntityDescriptors(q)
-  if (eds.size != 1)
-    return nil
+
+  def initialize
+    # fetch metadata, find entityID matches
+    @doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
+    @doc.remove_namespaces! # until/unless we figure out how to do this right
   end
-  eds[0]
-end
 
-def get_entityIDs(q)
-  get_EntityDescriptors(q).map{ |ed| ed.get_attribute("entityID") }
-end
+  def entity_descriptors(q)
+    # search for entities w/ matching entityIDs, limit search to SSO providers
+    @doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService][@entityID]")
+  end
 
-def get_entity_info(q)
-  ret = nil
-  entities = get_EntityDescriptors(q)
+  def entity_descriptor(q)
+    eds = entity_descriptors(q)
+    if (eds.size != 1)
+      return nil
+    end
+    eds[0]
+  end
 
-  if (entities.size == 1)
-    entity = entities[0]
-    eid = entity.get_attribute("entityID")
+  def entity_ids(q)
+    entity_descriptors(q).map{ |ed| ed.get_attribute("entityID") }
+  end
 
-    support = entity.xpath("ContactPerson[@contactType = 'support'][./EmailAddress]").map{ |cp| cp.xpath("./EmailAddress")[0].content }
-    technical = entity.xpath("ContactPerson[@contactType = 'technical'][./EmailAddress]").map{ |cp| cp.xpath("./EmailAddress")[0].content }
+  def entity_info(q)
+    ret = nil
+    entities = entity_descriptors(q)
 
-    support.uniq!
-    technical.uniq!
+    if (entities.size == 1)
+      entity = entities[0]
+      eid = entity.get_attribute("entityID")
 
-    name = nil
-    org = entity.xpath("./Organization/OrganizationName")[0]
-    if org
-      name = org.content
+      support = entity.xpath("ContactPerson[@contactType = 'support'][./EmailAddress]").map{ |cp| cp.xpath("./EmailAddress")[0].content }
+      technical = entity.xpath("ContactPerson[@contactType = 'technical'][./EmailAddress]").map{ |cp| cp.xpath("./EmailAddress")[0].content }
+
+      support.uniq!
+      technical.uniq!
+
+      name = nil
+      org = entity.xpath("./Organization/OrganizationName")[0]
+      if org
+	name = org.content
+      end
+
+      ret = { support_contacts: support, technical_contacts: technical, entityID: eid, name: name }
     end
 
-    ret = { support_contacts: support, technical_contacts: technical, entityID: eid, name: name }
+    ret
   end
 
-  ret
-end
+  # generate SessionInitiator for shibboleth2.xml
+  # if location is skipped, attempts to guess location from entityID
+  def initiator(eid,location=nil)
+    unless(location)
+      /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net|ac\.uk)/ =~ eid
+      location = domain
+      location ||= 'LOCATION_HERE'
+    end
 
-# generate SessionInitiator for shibboleth2.xml
-# if location is skipped, attempts to guess location from entityID
-def mk_initiator(eid,location=nil)
-  unless(location)
-    /\b(?<domain>[a-z\-]+)\.(edu|gov|com|org|net|ac\.uk)/ =~ eid
-    location = domain
-    location ||= 'LOCATION_HERE'
+    <<~SessionInitiator
+      <SessionInitiator type="Chaining" Location="/#{location}"
+	  entityID="#{eid}" template="bindingTemplate.html">
+	  <SessionInitiator type="SAML2"/>
+	  <SessionInitiator type="Shib1"/>
+      </SessionInitiator>
+    SessionInitiator
   end
-
-  <<SessionInitiator
-<SessionInitiator type="Chaining" Location="/#{location}"
-    entityID="#{eid}" template="bindingTemplate.html">
-    <SessionInitiator type="SAML2"/>
-    <SessionInitiator type="Shib1"/>
-</SessionInitiator>
-SessionInitiator
 end
