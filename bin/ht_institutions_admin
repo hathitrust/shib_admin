@@ -148,6 +148,7 @@ else
     current = {
       sdrinst: domain_base,
       inst_id: domain_base,
+      mapto_inst_id: domain_base,
       grin_instance: nil,
       name: info[:name],
       template: "https://___HOST___/Shibboleth.sso/#{domain_base}?target=___TARGET___",
