@@ -16,14 +16,6 @@ class ShibMetadata
     @doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService][@entityID]")
   end
 
-  def entity_descriptor(q)
-    eds = entity_descriptors(q)
-    if (eds.size != 1)
-      return nil
-    end
-    eds[0]
-  end
-
   def entity_ids(q)
     entity_descriptors(q).map{ |ed| ed.get_attribute("entityID") }
   end
@@ -45,7 +37,7 @@ class ShibMetadata
       name = nil
       org = entity.xpath("./Organization/OrganizationName")[0]
       if org
-	name = org.content
+        name = org.content
       end
 
       ret = { support_contacts: support, technical_contacts: technical, entityID: eid, name: name }

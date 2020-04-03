@@ -87,7 +87,8 @@ def pp(hash)
   end
 end
 
-eds = get_EntityDescriptors(q)
+metadata = ShibMetadata.new
+eds = metadata.entity_descriptors(q)
 
 # no match
 if eds.size != 1
@@ -142,7 +143,7 @@ else
     print "Domain Base (domain w/o tld) "
     domain_base = get_string(domain_base)
 
-    info = get_entity_info(eid)
+    info = metadata.entity_info(eid)
 
     # default values
     current = {
@@ -151,7 +152,7 @@ else
       mapto_inst_id: domain_base,
       grin_instance: nil,
       name: info[:name],
-      template: "https://___HOST___/Shibboleth.sso/#{domain_base}?target=___TARGET___",
+      template: "https://___HOST___/Shibboleth.sso/Login?entityID=#{eid}&?target=___TARGET___",
       authtype: "shibboleth",
       domain: domain,
       us: true,
@@ -198,8 +199,10 @@ else
   pp current
 
   print "Commit to database? "
-  commit = yorn(!entry_exists)
-  commit or exit 0
+  commit = yorn(!entry_exists) 
+  if( ! commit )
+    exit 0
+  end
 
   if (entry_exists)
     inst_id = current.delete(:inst_id)
