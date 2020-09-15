@@ -4,16 +4,20 @@ require 'nokogiri'
 
 class ShibMetadata
 
+  INCOMMON_IDP_AGGREGATE=URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')
+  OPENATHENS_AGGREGATE=URI('http://fed.openathens.net/oafed/metadata')
 
   def initialize
+    uris = [INCOMMON_IDP_AGGREGATE, OPENATHENS_AGGREGATE]
+
     # fetch metadata, find entityID matches
-    @doc = Nokogiri::XML(Net::HTTP.get(URI('http://md.incommon.org/InCommon/InCommon-metadata-idp-only.xml')))
-    @doc.remove_namespaces! # until/unless we figure out how to do this right
+    @docs = uris.map { |u| Nokogiri::XML(Net::HTTP.get(u)) }
+    @docs.each { |doc| doc.remove_namespaces! } # until/unless we figure out how to do this right
   end
 
   def entity_descriptors(q)
     # search for entities w/ matching entityIDs, limit search to SSO providers
-    @doc.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService][@entityID]")
+    @docs.map { |d| d.xpath("//EntityDescriptor[contains(@entityID,'#{q}')][.//SingleSignOnService][@entityID]") }.flatten
   end
 
   def entity_ids(q)
