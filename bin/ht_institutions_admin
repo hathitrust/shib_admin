@@ -14,33 +14,43 @@ require 'sequel'
 require_relative '../lib/metadata.rb'
 require 'io/console'
 
-# get args
-verbose = false
-OptionParser.new do |opts|
-  opts.banner = <<usage
+def main
 
-Usage: #{$0} [ entityID_substring ]
+  # get args
+  verbose = false
+  OptionParser.new do |opts|
+    opts.banner = <<~usage
 
-Create or edit the ht_institutions table entry for specified entityID. Entry
-only be edited by this tool if it is not yet enabled or does not yet exist.
+  Usage: #{$0} [ entityID_substring ]
 
-There must be exactly one matching entityID in the metadata.
-usage
+  Create or edit the ht_institutions table entry for specified entityID. Entry
+  only be edited by this tool if it is not yet enabled or does not yet exist.
+
+  There must be at most one matching entityID in the InCommon metadata.
+
+  If no entityID matches, you can manually enter the information. This is useful
+  for entities that are not in the InCommon metadata.
+
+  usage
 
   opts.on("-h", "--help", "Prints this help") do
     puts opts
     exit
   end
 
-end.parse!
+  end.parse!
 
-q = ARGV.shift
+  q = ARGV.shift
 
-def yorn(default)
+  inst = HTInstitution.new(q)
+  inst.edit if yorn("Edit?", default: false)
+end
+
+def yorn(prompt, default: false)
   if(default)
-    print "[Y/n]: "
+    print "#{prompt} [Y/n]: "
   else
-    print "[y/N]: "
+    print "#{prompt} [y/N]: "
   end
 
   ret = default
@@ -65,11 +75,11 @@ def yorn(default)
   ret
 end
 
-def get_string(default)
+def get_string(prompt, default: )
   if (default==nil)
-    print "[NULL]: "
+    print "#{prompt} [NULL]: "
   else
-    print "[#{default}]: "
+    print "#{prompt} [#{default}]: "
   end
   answer = gets
   answer.chomp!
@@ -87,48 +97,119 @@ def pp(hash)
   end
 end
 
-metadata = ShibMetadata.new
-eds = metadata.entity_descriptors(q)
+def db_connect
+  Sequel.mysql2('ht',user:ENV['MYSQL_USER'],host:ENV['MYSQL_HOST'],port:ENV['MYSQL_PORT'],password:ENV['MYSQL_PASS'])
+end
 
-# no match
-if eds.size != 1
-  puts "#{eds.size} matches. Try using shib_info to find an entityID substring with exactly one match."
-# one match, continue
-else
-  ed = eds[0]
-  eid = ed.get_attribute("entityID")
-  puts "EntityID: #{eid}"
-  puts "Connecting to Database..."
-  puts "Username: #{ENV['USER']}"
-  print "Password: "
-  IO::console.echo=false  
-  password = gets
-  IO::console.echo=true
-  password.chomp!
-  puts
-  
-  #DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-htdev',password:password)
-  DB = Sequel.mysql2('ht_repository',user:ENV['USER'],host:'mysql-sdr',password:password)
-  current = DB[:ht_institutions].where(entityID:eid).all
-  if (current.size > 1)
-    puts "More than 1 db entry found for entityID \"#{eid}\". Aborting."
-    exit 0
+
+class HTInstitution
+  public
+
+  def initialize(db=db_connect,eid_substring)
+    @db = db_connect
+    @entity_info = {}
+    @current = find(eid_substring)
   end
 
-  entry_exists = false
-  edit = true
-  if (current.size == 1)
-    puts "Existing entry found."
-    current = current[0]
-    pp current
-    if (current[:enabled])
-      puts "Edit mode not allowed for production entries, exiting."
-      exit 0
+  def edit
+    puts "Editing settings for #{current[:inst_id]}."
+    puts "Enter changes as desired, press Enter without typing to accept default/current values."
+
+    current.keys.each do |k|
+      v = current[k]
+      # no edit allowed
+      if(no_edit.include?(k))
+        puts "#{k}: #{v} (cannot edit)"
+      # true/false edit
+      elsif(v == true or v == false)
+        current[k] = yorn(k,default: v)
+      # string edit
+      else
+        current[k] = get_string(k,default: v)
+      end
     end
-    print "Edit?"
-    edit = yorn(false)
-    entry_exists = true
-  else
+
+    pp current
+    ask_commit
+  end
+
+  private
+
+  def find(eid_substring)
+    find_eid(eid_substring)
+
+    if (db_inst= find_in_database(eid || eid_substring))
+      puts "Existing entry found."
+      pp db_inst
+      @entry_exists = true
+      db_inst
+    else
+      @entry_exists = false
+      default_values(eid || eid_substring)
+    end
+  end
+
+  def no_edit
+    return @no_edit if @no_edit
+
+    @no_edit = [:sdrinst,:entityID,:authtype,:orph_agree]
+    if (entry_exists)
+      # don't change primary keys
+      @no_edit.push(:inst_id)
+    else
+      # don't ask twice
+      @no_edit.push(:domain)
+    end
+  end
+
+  def ask_commit
+    yorn("Commit to database?", default: !entry_exists) && upsert
+  end
+
+  def upsert
+    if (entry_exists)
+      inst_id = current.delete(:inst_id)
+      eid = current.delete(:entityID)
+      qq = db[:ht_institutions].where(inst_id: inst_id, entityID: eid)
+      if(qq.count != 1)
+        puts "ERROR UPDATING TABLE: #{qq.count} rows found to update. Aborting."
+      end
+      result = db[:ht_institutions].where(inst_id: inst_id, entityID: eid).update(current)
+      puts "#{result} row updated"
+    else
+      db[:ht_institutions].insert(current)
+    end
+  end
+
+  def find_eid(eid_substring)
+    metadata = ShibMetadata.new
+    eds = metadata.entity_descriptors(eid_substring)
+    # no match
+    if eds.size > 1
+      puts "#{eds.size} matches. Try using shib_info to find an entityID substring with exactly one match."
+      exit
+    elsif eds.size == 0
+      puts "No match in metadata. Searching the database for a match"
+    else
+      @ed = eds[0]
+      @eid = ed.get_attribute("entityID")
+      @name = metadata.entity_info(@eid)[:name]
+      puts "EntityID: #{eid}"
+    end
+  end
+
+  def find_in_database(eid,db=db_connect)
+    result = db[:ht_institutions].where(entityID:eid).all
+    if (result.size > 1)
+      puts "More than 1 db entry found for entityID \"#{eid}\". Aborting."
+      exit 0
+    else
+      result[0]
+    end
+  end
+
+
+  def default_values(eid)
     domain = "EXAMPLE.edu"
     domain_base = "EXAMPLE"
     /\b(?<base>[a-z\-]+)\.(?<ext>edu|gov|com|org|net|ac\.uk)/ =~ eid
@@ -138,12 +219,8 @@ else
     end
 
     puts "Looks like this is a new institution. Please confirm I've got the domain right."
-    print "Domain "
-    domain = get_string(domain)
-    print "Domain Base (domain w/o tld) "
-    domain_base = get_string(domain_base)
-
-    info = metadata.entity_info(eid)
+    domain = get_string("Domain",default: domain)
+    domain_base = get_string("Domain Base (domain w/o tld)",default: domain_base)
 
     # default values
     current = {
@@ -151,70 +228,21 @@ else
       inst_id: domain_base,
       mapto_inst_id: domain_base,
       grin_instance: nil,
-      name: info[:name],
-      template: "https://___HOST___/Shibboleth.sso/Login?entityID=#{eid}&?target=___TARGET___",
+      name: name,
+      template: "https://___HOST___/Shibboleth.sso/Login?entityID=#{eid}&target=___TARGET___",
       authtype: "shibboleth",
       domain: domain,
       us: true,
       enabled: false,
       orph_agree: false,
       entityID: eid,
-      allowed_affiliations: "^(alum|member)@#{domain}"
+      allowed_affiliations: "^(alum|member|faculty|staff|student)@#{domain}",
+      emergency_status: nil,
+      emergency_contact: nil
     }
   end
 
-  unless(edit)
-    exit 0
-  end
-
-  # edit here
-  no_edit = [:entityID,:authtype]
-  if (entry_exists)
-    # don't change primary keys
-    no_edit.push(:inst_id)
-  else
-    # don't ask twice
-    no_edit.push(:domain)
-  end
-
-  puts "Editing settings for #{current[:inst_id]}."
-  puts "Enter changes as desired, press Enter without typing to accept default/current values."
-
-  current.keys.each do |k|
-    v = current[k]
-    # no edit allowed
-    if(no_edit.include?(k))
-      puts "#{k}: #{v} (cannot edit)"
-    # true/false edit
-    elsif(v == true or v == false)
-      print k; print ' '
-      current[k] = yorn(v)
-    # string edit
-    else
-      print "#{k} "
-      current[k] = get_string(v)
-    end
-  end
-
-  pp current
-
-  print "Commit to database? "
-  commit = yorn(!entry_exists) 
-  if( ! commit )
-    exit 0
-  end
-
-  if (entry_exists)
-    inst_id = current.delete(:inst_id)
-    current.delete(:authtype)
-    current.delete(:entityID)
-    qq = DB[:ht_institutions].where(inst_id: inst_id, entityID: eid)
-    if(qq.count != 1)
-      puts "ERROR UPDATING TABLE: #{qq.count} rows found to update. Aborting."
-    end
-    result = DB[:ht_institutions].where(inst_id: inst_id, entityID: eid).update(current)
-    puts "#{result} row updated"
-  else
-    DB[:ht_institutions].insert(current)
-  end
+  attr_reader :db, :ed, :current, :entry_exists, :eid, :name
 end
+
+main if caller
