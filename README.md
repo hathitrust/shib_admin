@@ -1,4 +1,4 @@
-> :warn: The functionality here has been superceded by https://github.com/hathitrust/otis/
+> ⚠️ The functionality here has been superceded by https://github.com/hathitrust/otis/
 
 # shib_admin
 Utilities for HathiTrust administration
